@@ -1,0 +1,6 @@
+{
+  "name": "CicloTreino - Diário Inteligente de Musculação",
+  "description": "Diário inteligente de musculação mobile-first com progressão de carga, cronômetro de descanso, histórico individual e ciclos contínuos independentes de dias da semana.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
