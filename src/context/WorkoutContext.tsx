@@ -90,6 +90,8 @@ interface WorkoutContextType {
   // Cycle & Exercise Management
   setActiveCycleId: (cycleId: string) => void;
   createNewCycle: (name: string, description: string, workoutNames: string[]) => void;
+  updateCycle: (cycleId: string, updates: { name: string; description?: string; workouts: { id?: string; name: string; exerciseIds?: string[] }[] }) => void;
+  deleteCycle: (cycleId: string) => void;
   addExerciseToLibrary: (name: string, muscleGroup: MuscleGroup, notes?: string) => Exercise;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   overrideNextWorkout: (workoutId: string | null) => void;
@@ -599,6 +601,113 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setCycles(updatedCycles);
   }, [profile.id]);
 
+  const updateCycle = useCallback(
+    (
+      cycleId: string,
+      updates: {
+        name: string;
+        description?: string;
+        workouts: { id?: string; name: string; exerciseIds?: string[] }[];
+      }
+    ) => {
+      const currentCycles = store.getCycles();
+      const allExercises = store.getExercises();
+
+      const updatedCycles = currentCycles.map((cycle) => {
+        if (cycle.id !== cycleId) return cycle;
+
+        // Build updated workouts list
+        const updatedWorkouts: Workout[] = updates.workouts.map((wData, idx) => {
+          const existingWorkout = cycle.workouts.find((ew) => ew.id === wData.id);
+          const workoutId = wData.id || `w-${cycleId}-${Date.now()}-${idx}`;
+
+          // Keep existing exercises or create defaults from exerciseIds or existing
+          let exercisesForWorkout: WorkoutExerciseConfig[] = [];
+
+          if (wData.exerciseIds && wData.exerciseIds.length > 0) {
+            exercisesForWorkout = wData.exerciseIds.map((exId, exIdx) => {
+              const existingCfg = existingWorkout?.exercises.find((e) => e.exerciseId === exId);
+              return {
+                id: existingCfg?.id || `we-${workoutId}-${exIdx}`,
+                workoutId,
+                exerciseId: exId,
+                orderIndex: exIdx,
+                targetSets: existingCfg?.targetSets || 4,
+                targetReps: existingCfg?.targetReps || 10,
+                targetLoadKg: existingCfg?.targetLoadKg || 20,
+                restSeconds: existingCfg?.restSeconds || profile.defaultRestSeconds || 90,
+              };
+            });
+          } else if (existingWorkout) {
+            exercisesForWorkout = existingWorkout.exercises.map((e, exIdx) => ({
+              ...e,
+              orderIndex: exIdx,
+            }));
+          } else {
+            // Default 3 exercises if newly added
+            const sampleSlice = allExercises.slice(idx * 2, idx * 2 + 3);
+            exercisesForWorkout = sampleSlice.map((ex, exIdx) => ({
+              id: `we-${workoutId}-${exIdx}`,
+              workoutId,
+              exerciseId: ex.id,
+              orderIndex: exIdx,
+              targetSets: 4,
+              targetReps: 10,
+              targetLoadKg: 20,
+              restSeconds: 90,
+            }));
+          }
+
+          return {
+            id: workoutId,
+            cycleId,
+            userId: profile.id,
+            name: wData.name,
+            orderIndex: idx,
+            exercises: exercisesForWorkout,
+            createdAt: existingWorkout?.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+
+        return {
+          ...cycle,
+          name: updates.name,
+          description: updates.description ?? cycle.description,
+          workouts: updatedWorkouts,
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      store.saveCycles(updatedCycles);
+      setCycles(updatedCycles);
+    },
+    [profile.id, profile.defaultRestSeconds]
+  );
+
+  const deleteCycle = useCallback(
+    (cycleId: string) => {
+      const currentCycles = store.getCycles();
+      if (currentCycles.length <= 1) return; // Prevent deleting the only cycle
+
+      let nextActiveId: string | null = null;
+      const targetCycle = currentCycles.find((c) => c.id === cycleId);
+
+      const filtered = currentCycles.filter((c) => c.id !== cycleId);
+      if (targetCycle?.isActive && filtered.length > 0) {
+        filtered[0].isActive = true;
+        nextActiveId = filtered[0].id;
+      }
+
+      store.saveCycles(filtered);
+      setCycles(filtered);
+      if (nextActiveId) {
+        setActiveCycleId(nextActiveId);
+      }
+    },
+    [setActiveCycleId]
+  );
+
   // EXERCISE MANAGEMENT
   const addExerciseToLibrary = useCallback((name: string, muscleGroup: MuscleGroup, notes?: string): Exercise => {
     const newEx = store.addExercise({
@@ -697,6 +806,8 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setIsAuthModalOpen,
         setActiveCycleId,
         createNewCycle,
+        updateCycle,
+        deleteCycle,
         addExerciseToLibrary,
         updateUserProfile,
         overrideNextWorkout,
