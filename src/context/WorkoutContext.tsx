@@ -46,6 +46,8 @@ interface WorkoutContextType {
   // Sets & Exercise Actions
   recordSet: (exerciseIndex: number, setIndex: number, loadKg: number, reps: number) => void;
   quickUpdateSet: (exerciseIndex: number, setIndex: number, newLoad: number, newReps: number) => void;
+  addSetToCurrentExercise: (exerciseIndex: number) => void;
+  removeSetFromCurrentExercise: (exerciseIndex: number, setIndex?: number) => void;
   finishExercise: (exerciseIndex: number) => void;
   applyProgressionChoice: (
     exerciseIndex: number,
@@ -90,9 +92,28 @@ interface WorkoutContextType {
   // Cycle & Exercise Management
   setActiveCycleId: (cycleId: string) => void;
   createNewCycle: (name: string, description: string, workoutNames: string[]) => void;
-  updateCycle: (cycleId: string, updates: { name: string; description?: string; workouts: { id?: string; name: string; exerciseIds?: string[] }[] }) => void;
+  updateCycle: (
+    cycleId: string,
+    updates: {
+      name: string;
+      description?: string;
+      workouts: {
+        id?: string;
+        name: string;
+        exerciseIds?: string[];
+        exercisesConfig?: {
+          exerciseId: string;
+          targetSets: number;
+          targetReps: number;
+          targetLoadKg: number;
+          restSeconds: number;
+        }[];
+      }[];
+    }
+  ) => void;
   deleteCycle: (cycleId: string) => void;
-  addExerciseToLibrary: (name: string, muscleGroup: MuscleGroup, notes?: string) => Exercise;
+  addExerciseToLibrary: (name: string, muscleGroup: MuscleGroup, notes?: string, defaultSets?: number, defaultReps?: number) => Exercise;
+  updateExerciseInLibrary: (exerciseId: string, updates: Partial<Exercise>) => void;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   overrideNextWorkout: (workoutId: string | null) => void;
   exportDatabaseJSON: () => string;
@@ -380,13 +401,101 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const targetExercise = { ...updatedExercises[exerciseIndex] };
       const updatedSets = [...targetExercise.sets];
 
+      const oldLoad = updatedSets[setIndex]?.loadKg;
+      const safeLoad = Math.max(0, newLoad);
+      const safeReps = Math.max(1, newReps);
+
+      // Update current set
       updatedSets[setIndex] = {
         ...updatedSets[setIndex],
-        loadKg: Math.max(0, newLoad),
-        repsPerformed: Math.max(1, newReps),
+        loadKg: safeLoad,
+        repsPerformed: safeReps,
       };
 
+      // Propagate load to subsequent uncompleted sets if the user adjusted the load
+      if (oldLoad !== undefined && safeLoad !== oldLoad) {
+        for (let i = setIndex + 1; i < updatedSets.length; i++) {
+          if (!updatedSets[i].completed) {
+            updatedSets[i] = {
+              ...updatedSets[i],
+              loadKg: safeLoad,
+            };
+          }
+        }
+      }
+
       targetExercise.sets = updatedSets;
+      updatedExercises[exerciseIndex] = targetExercise;
+
+      const updatedSession: WorkoutSession = {
+        ...prev,
+        exercises: updatedExercises,
+      };
+
+      store.saveActiveSession(updatedSession);
+      return updatedSession;
+    });
+  }, []);
+
+  // ADD SET DYNAMICALLY DURING WORKOUT
+  const addSetToCurrentExercise = useCallback((exerciseIndex: number) => {
+    setActiveSession((prev) => {
+      if (!prev) return null;
+      const updatedExercises = [...prev.exercises];
+      const targetExercise = { ...updatedExercises[exerciseIndex] };
+      const currentSets = [...targetExercise.sets];
+
+      const lastSet = currentSets[currentSets.length - 1];
+      const newSetNumber = currentSets.length + 1;
+      const defaultLoad = lastSet ? lastSet.loadKg : (targetExercise.lastLoadKg || 20);
+      const defaultReps = lastSet ? lastSet.repsPerformed : targetExercise.targetReps;
+
+      const newSet: SessionSet = {
+        id: `set-${Date.now()}-${exerciseIndex}-${newSetNumber}`,
+        sessionExerciseId: targetExercise.id,
+        setNumber: newSetNumber,
+        loadKg: defaultLoad,
+        repsPerformed: defaultReps,
+        targetReps: targetExercise.targetReps,
+        completed: false,
+      };
+
+      currentSets.push(newSet);
+      targetExercise.sets = currentSets;
+      targetExercise.targetSets = Math.max(targetExercise.targetSets, currentSets.length);
+      updatedExercises[exerciseIndex] = targetExercise;
+
+      const updatedSession: WorkoutSession = {
+        ...prev,
+        exercises: updatedExercises,
+      };
+
+      store.saveActiveSession(updatedSession);
+      return updatedSession;
+    });
+  }, []);
+
+  // REMOVE SET DYNAMICALLY DURING WORKOUT
+  const removeSetFromCurrentExercise = useCallback((exerciseIndex: number, setIndex?: number) => {
+    setActiveSession((prev) => {
+      if (!prev) return null;
+      const updatedExercises = [...prev.exercises];
+      const targetExercise = { ...updatedExercises[exerciseIndex] };
+      let currentSets = [...targetExercise.sets];
+
+      if (currentSets.length <= 1) return prev; // Keep at least 1 set
+
+      const indexToRemove = setIndex !== undefined ? setIndex : currentSets.length - 1;
+      currentSets = currentSets.filter((_, i) => i !== indexToRemove);
+
+      // Re-number remaining sets
+      currentSets = currentSets.map((s, idx) => ({
+        ...s,
+        setNumber: idx + 1,
+      }));
+
+      targetExercise.sets = currentSets;
+      targetExercise.targetSets = currentSets.length;
       updatedExercises[exerciseIndex] = targetExercise;
 
       const updatedSession: WorkoutSession = {
@@ -607,7 +716,18 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updates: {
         name: string;
         description?: string;
-        workouts: { id?: string; name: string; exerciseIds?: string[] }[];
+        workouts: {
+          id?: string;
+          name: string;
+          exerciseIds?: string[];
+          exercisesConfig?: {
+            exerciseId: string;
+            targetSets: number;
+            targetReps: number;
+            targetLoadKg: number;
+            restSeconds: number;
+          }[];
+        }[];
       }
     ) => {
       const currentCycles = store.getCycles();
@@ -621,21 +741,35 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const existingWorkout = cycle.workouts.find((ew) => ew.id === wData.id);
           const workoutId = wData.id || `w-${cycleId}-${Date.now()}-${idx}`;
 
-          // Keep existing exercises or create defaults from exerciseIds or existing
           let exercisesForWorkout: WorkoutExerciseConfig[] = [];
 
-          if (wData.exerciseIds && wData.exerciseIds.length > 0) {
+          if (wData.exercisesConfig && wData.exercisesConfig.length > 0) {
+            exercisesForWorkout = wData.exercisesConfig.map((cfg, exIdx) => {
+              const existingCfg = existingWorkout?.exercises.find((e) => e.exerciseId === cfg.exerciseId);
+              return {
+                id: existingCfg?.id || `we-${workoutId}-${exIdx}`,
+                workoutId,
+                exerciseId: cfg.exerciseId,
+                orderIndex: exIdx,
+                targetSets: cfg.targetSets || 4,
+                targetReps: cfg.targetReps || 10,
+                targetLoadKg: cfg.targetLoadKg || 20,
+                restSeconds: cfg.restSeconds || profile.defaultRestSeconds || 90,
+              };
+            });
+          } else if (wData.exerciseIds && wData.exerciseIds.length > 0) {
             exercisesForWorkout = wData.exerciseIds.map((exId, exIdx) => {
               const existingCfg = existingWorkout?.exercises.find((e) => e.exerciseId === exId);
+              const exDef = allExercises.find((e) => e.id === exId);
               return {
                 id: existingCfg?.id || `we-${workoutId}-${exIdx}`,
                 workoutId,
                 exerciseId: exId,
                 orderIndex: exIdx,
-                targetSets: existingCfg?.targetSets || 4,
-                targetReps: existingCfg?.targetReps || 10,
+                targetSets: existingCfg?.targetSets || exDef?.defaultSets || 4,
+                targetReps: existingCfg?.targetReps || exDef?.defaultReps || 10,
                 targetLoadKg: existingCfg?.targetLoadKg || 20,
-                restSeconds: existingCfg?.restSeconds || profile.defaultRestSeconds || 90,
+                restSeconds: existingCfg?.restSeconds || exDef?.defaultRestSeconds || profile.defaultRestSeconds || 90,
               };
             });
           } else if (existingWorkout) {
@@ -651,10 +785,10 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
               workoutId,
               exerciseId: ex.id,
               orderIndex: exIdx,
-              targetSets: 4,
-              targetReps: 10,
+              targetSets: ex.defaultSets || 4,
+              targetReps: ex.defaultReps || 10,
               targetLoadKg: 20,
-              restSeconds: 90,
+              restSeconds: ex.defaultRestSeconds || 90,
             }));
           }
 
@@ -709,16 +843,25 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
   );
 
   // EXERCISE MANAGEMENT
-  const addExerciseToLibrary = useCallback((name: string, muscleGroup: MuscleGroup, notes?: string): Exercise => {
+  const addExerciseToLibrary = useCallback((name: string, muscleGroup: MuscleGroup, notes?: string, defaultSets?: number, defaultReps?: number): Exercise => {
     const newEx = store.addExercise({
       name,
       muscleGroup,
       notes,
+      defaultSets: defaultSets || 4,
+      defaultReps: defaultReps || 10,
       defaultRestSeconds: profile.defaultRestSeconds,
     });
     setExercises(store.getExercises());
     return newEx;
   }, [profile.defaultRestSeconds]);
+
+  const updateExerciseInLibrary = useCallback((exerciseId: string, updates: Partial<Exercise>) => {
+    const updated = store.updateExercise(exerciseId, updates);
+    if (updated) {
+      setExercises(store.getExercises());
+    }
+  }, []);
 
   // PROFILE MANAGEMENT
   const updateUserProfile = useCallback((updates: Partial<UserProfile>) => {
@@ -782,6 +925,8 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         finishWorkout,
         recordSet,
         quickUpdateSet,
+        addSetToCurrentExercise,
+        removeSetFromCurrentExercise,
         finishExercise,
         applyProgressionChoice,
         swapExerciseInSession,
@@ -809,6 +954,7 @@ export const WorkoutProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateCycle,
         deleteCycle,
         addExerciseToLibrary,
+        updateExerciseInLibrary,
         updateUserProfile,
         overrideNextWorkout,
         exportDatabaseJSON,

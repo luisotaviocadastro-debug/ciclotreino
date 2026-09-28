@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   XCircle,
   TrendingUp,
+  PlusCircle,
+  Trash2,
 } from 'lucide-react';
 
 export const ActiveWorkoutScreen: React.FC = () => {
@@ -19,6 +21,8 @@ export const ActiveWorkoutScreen: React.FC = () => {
     setCurrentExerciseIndex,
     recordSet,
     quickUpdateSet,
+    addSetToCurrentExercise,
+    removeSetFromCurrentExercise,
     finishExercise,
     finishWorkout,
     cancelWorkout,
@@ -208,8 +212,25 @@ export const ActiveWorkoutScreen: React.FC = () => {
                   {set.repsPerformed} <span className="text-[10px] font-normal text-slate-500">reps</span>
                 </div>
 
-                {/* Complete Button Icon */}
-                <div className="col-span-2 flex justify-end">
+                {/* Complete Button Icon & Delete */}
+                <div className="col-span-2 flex items-center justify-end gap-1.5">
+                  {sets.length > 1 && !set.completed && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeSetFromCurrentExercise(currentExerciseIndex, idx);
+                        if (selectedSetIdx >= sets.length - 1) {
+                          setSelectedSetIdx(Math.max(0, sets.length - 2));
+                        }
+                      }}
+                      className="p-1 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition cursor-pointer"
+                      title="Excluir esta série"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -227,6 +248,21 @@ export const ActiveWorkoutScreen: React.FC = () => {
               </div>
             );
           })}
+
+          {/* Dynamic "+ Série" button */}
+          <div className="pt-1 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                addSetToCurrentExercise(currentExerciseIndex);
+                setSelectedSetIdx(sets.length);
+              }}
+              className="w-full py-2.5 rounded-2xl bg-slate-950/80 hover:bg-slate-800/80 border border-dashed border-slate-700 hover:border-emerald-500/50 text-slate-300 hover:text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer"
+            >
+              <PlusCircle className="w-4 h-4 text-emerald-400" />
+              <span>Adicionar Série #{sets.length + 1}</span>
+            </button>
+          </div>
         </div>
 
         {/* Quick Stepper Controllers for Active Set (One-handed ergonomics) */}

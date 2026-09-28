@@ -14,7 +14,20 @@ import {
   ArrowUp,
   ArrowDown,
   Sparkles,
+  Minus,
 } from 'lucide-react';
+
+interface EditableWorkoutState {
+  id?: string;
+  name: string;
+  exercisesConfig: {
+    exerciseId: string;
+    targetSets: number;
+    targetReps: number;
+    targetLoadKg: number;
+    restSeconds: number;
+  }[];
+}
 
 export const CyclesScreen: React.FC = () => {
   const {
@@ -42,9 +55,7 @@ export const CyclesScreen: React.FC = () => {
   const [editingCycle, setEditingCycle] = useState<Cycle | null>(null);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
-  const [editWorkouts, setEditWorkouts] = useState<
-    { id?: string; name: string; exerciseIds: string[] }[]
-  >([]);
+  const [editWorkouts, setEditWorkouts] = useState<EditableWorkoutState[]>([]);
   const [selectedWorkoutIndexForExercises, setSelectedWorkoutIndexForExercises] = useState<number | null>(null);
 
   // Deletion Confirm State
@@ -85,7 +96,13 @@ export const CyclesScreen: React.FC = () => {
         .map((w) => ({
           id: w.id,
           name: w.name,
-          exerciseIds: w.exercises.map((e) => e.exerciseId),
+          exercisesConfig: w.exercises.map((e) => ({
+            exerciseId: e.exerciseId,
+            targetSets: e.targetSets || 4,
+            targetReps: e.targetReps || 10,
+            targetLoadKg: e.targetLoadKg || 20,
+            restSeconds: e.restSeconds || 90,
+          })),
         }))
     );
     setSelectedWorkoutIndexForExercises(null);
@@ -111,7 +128,7 @@ export const CyclesScreen: React.FC = () => {
       ...prev,
       {
         name: `Treino ${newIdx} — Novo`,
-        exerciseIds: [],
+        exercisesConfig: [],
       },
     ]);
   };
@@ -138,11 +155,37 @@ export const CyclesScreen: React.FC = () => {
     setEditWorkouts((prev) => {
       const copy = [...prev];
       const target = { ...copy[workoutIndex] };
-      if (target.exerciseIds.includes(exerciseId)) {
-        target.exerciseIds = target.exerciseIds.filter((id) => id !== exerciseId);
+      const exists = target.exercisesConfig.some((cfg) => cfg.exerciseId === exerciseId);
+      const exDef = allExercises.find((e) => e.id === exerciseId);
+
+      if (exists) {
+        target.exercisesConfig = target.exercisesConfig.filter((cfg) => cfg.exerciseId !== exerciseId);
       } else {
-        target.exerciseIds = [...target.exerciseIds, exerciseId];
+        target.exercisesConfig = [
+          ...target.exercisesConfig,
+          {
+            exerciseId,
+            targetSets: exDef?.defaultSets || 4,
+            targetReps: exDef?.defaultReps || 10,
+            targetLoadKg: 20,
+            restSeconds: exDef?.defaultRestSeconds || 90,
+          },
+        ];
       }
+      copy[workoutIndex] = target;
+      return copy;
+    });
+  };
+
+  const handleUpdateExerciseSets = (workoutIndex: number, exerciseId: string, delta: number) => {
+    setEditWorkouts((prev) => {
+      const copy = [...prev];
+      const target = { ...copy[workoutIndex] };
+      target.exercisesConfig = target.exercisesConfig.map((cfg) => {
+        if (cfg.exerciseId !== exerciseId) return cfg;
+        const newSets = Math.max(1, Math.min(10, cfg.targetSets + delta));
+        return { ...cfg, targetSets: newSets };
+      });
       copy[workoutIndex] = target;
       return copy;
     });
@@ -161,7 +204,7 @@ export const CyclesScreen: React.FC = () => {
         <div>
           <h2 className="text-xl font-black text-white">Ciclos de Treino</h2>
           <p className="text-xs text-slate-400">
-            Crie, personalize ou edite a sequência dos seus treinos
+            Crie, personalize ou edite a sequência e séries dos treinos
           </p>
         </div>
 
@@ -358,14 +401,14 @@ export const CyclesScreen: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   {editWorkouts.map((w, wIdx) => {
                     const isConfiguringExercises = selectedWorkoutIndexForExercises === wIdx;
 
                     return (
                       <div
                         key={wIdx}
-                        className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2.5"
+                        className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3"
                       >
                         <div className="flex items-center gap-2">
                           <span className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 font-mono font-bold flex items-center justify-center text-xs">
@@ -430,46 +473,79 @@ export const CyclesScreen: React.FC = () => {
                           >
                             <Dumbbell className="w-3.5 h-3.5 text-emerald-400" />
                             <span>
-                              {w.exerciseIds.length}{' '}
-                              {w.exerciseIds.length === 1 ? 'exercício selecionado' : 'exercícios selecionados'}
+                              {w.exercisesConfig.length}{' '}
+                              {w.exercisesConfig.length === 1 ? 'exercício selecionado' : 'exercícios selecionados'}
                             </span>
                             <span className="text-[10px] text-slate-500 underline ml-1">
-                              {isConfiguringExercises ? 'Fechar lista' : 'Configurar lista'}
+                              {isConfiguringExercises ? 'Fechar lista' : 'Configurar lista e séries'}
                             </span>
                           </button>
                         </div>
 
-                        {/* Exercise selection dropdown panel */}
+                        {/* Exercise selection dropdown panel with Sets stepper */}
                         {isConfiguringExercises && (
                           <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 space-y-2 mt-2">
                             <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                              Marque os exercícios que pertencem a este treino:
+                              Selecione os exercícios e ajuste as séries:
                             </span>
-                            <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                            <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
                               {allExercises.map((ex) => {
-                                const isSelected = w.exerciseIds.includes(ex.id);
+                                const selectedConfig = w.exercisesConfig.find((cfg) => cfg.exerciseId === ex.id);
+                                const isSelected = Boolean(selectedConfig);
+
                                 return (
-                                  <label
+                                  <div
                                     key={ex.id}
-                                    className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition ${
+                                    className={`p-2 rounded-xl border text-xs transition ${
                                       isSelected
                                         ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
                                         : 'bg-slate-950 border-slate-800/80 text-slate-300 hover:border-slate-700'
                                     }`}
                                   >
-                                    <div className="flex items-center gap-2 truncate">
-                                      <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={() => handleToggleExerciseInWorkout(wIdx, ex.id)}
-                                        className="rounded accent-emerald-500 w-4 h-4 cursor-pointer"
-                                      />
-                                      <span className="font-semibold truncate">{ex.name}</span>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <label className="flex items-center gap-2 truncate cursor-pointer flex-1">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSelected}
+                                          onChange={() => handleToggleExerciseInWorkout(wIdx, ex.id)}
+                                          className="rounded accent-emerald-500 w-4 h-4 cursor-pointer"
+                                        />
+                                        <span className="font-semibold truncate">{ex.name}</span>
+                                      </label>
+                                      <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                        {ex.muscleGroup}
+                                      </span>
                                     </div>
-                                    <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                                      {ex.muscleGroup}
-                                    </span>
-                                  </label>
+
+                                    {/* Number of Sets Controller for this Exercise */}
+                                    {isSelected && selectedConfig && (
+                                      <div className="mt-2 pt-2 border-t border-emerald-500/20 flex items-center justify-between text-xs">
+                                        <span className="text-slate-400 font-bold text-[11px]">
+                                          Séries Padrão:
+                                        </span>
+                                        <div className="flex items-center gap-1.5 bg-slate-950 px-2 py-1 rounded-lg border border-emerald-500/30">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleUpdateExerciseSets(wIdx, ex.id, -1)}
+                                            className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                                          >
+                                            <Minus className="w-3 h-3" />
+                                          </button>
+                                          <span className="font-mono font-black text-emerald-400 w-5 text-center">
+                                            {selectedConfig.targetSets}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleUpdateExerciseSets(wIdx, ex.id, 1)}
+                                            className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                                          >
+                                            <Plus className="w-3 h-3" />
+                                          </button>
+                                          <span className="text-[10px] text-slate-500 ml-0.5">séries</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
                                 );
                               })}
                             </div>

@@ -623,6 +623,19 @@ class LocalDataStore {
     return newEx;
   }
 
+  updateExercise(exerciseId: string, updates: Partial<Exercise>): Exercise | null {
+    const exercises = this.getExercises();
+    const index = exercises.findIndex((e) => e.id === exerciseId);
+    if (index === -1) return null;
+    exercises[index] = {
+      ...exercises[index],
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    this.saveExercises(exercises);
+    return exercises[index];
+  }
+
   // Sessions
   getSessions(): WorkoutSession[] {
     try {

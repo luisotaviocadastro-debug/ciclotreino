@@ -33,6 +33,8 @@ export interface Exercise {
   userId: string;
   name: string;
   muscleGroup: MuscleGroup;
+  defaultSets?: number;
+  defaultReps?: number;
   defaultRestSeconds?: number;
   notes?: string;
   createdAt: string;
